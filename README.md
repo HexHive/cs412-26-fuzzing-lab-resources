@@ -1,5 +1,7 @@
 # CS412 Fuzzing intro lab resources
 
+[Slides](https://docs.google.com/presentation/d/1_xIYxHXqJmD1CH7IkFL5paujnAie4avRhbla4EJxQHs/edit?usp=sharing) to this weeks lab.
+
 Files we consider:
 
 - `Dockerfile` - environment with AFL++, clang, gcc and gdb
