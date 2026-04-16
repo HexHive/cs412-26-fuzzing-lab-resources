@@ -14,7 +14,5 @@ reports: image
 run: image
 	$(DOCKER) run --rm -it --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --entrypoint /bin/bash $(IMAGE)
 
-shell: run
-
 clean:
 	-$(DOCKER) rmi $(IMAGE)
