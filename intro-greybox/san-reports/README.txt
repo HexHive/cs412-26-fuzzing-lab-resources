@@ -1,0 +1,326 @@
+Table of Contents
+_________________
+
+1. Sanitizers: a look under the hood
+.. 1. Quick start
+.. 2. The `inspect' tool
+..... 1. List available programs
+..... 2. View source code
+..... 3. Disassemble `main()' --- without sanitizer
+..... 4. Disassemble `main()' --- with sanitizer
+..... 5. Unified diff --- plain vs sanitized
+..... 6. Pseudo-C decompilation (radare2)
+..... 7. Run a program
+.. 3. Bug programs
+.. 4. Other make targets
+.. 5. Using `objdump' directly
+.. 6. Using `radare2' directly
+.. 7. Debugging with `pwndbg'
+.. 8. Heap red-zone & shadow memory demo (`shadow_demo.py')
+.. 9. Final remarks
+
+
+1 Sanitizers: a look under the hood
+===================================
+
+  This is a self-contained Docker environment for demonstrating how
+  *AddressSanitizer (ASan)* and *UndefinedBehaviorSanitizer (UBSan)*
+  instrument compiled code. Built for the 2026 edition of the /Fuzzing
+  Lab (CS-412)/ lecture at EPFL.
+
+  Every bug program is pre-compiled *twice* inside the image---once
+  plain and once with its sanitizer---so we can instantly compare the
+  generated assembly and show the exact instructions the compiler
+  inserts.
+
+
+1.1 Quick start
+~~~~~~~~~~~~~~~
+
+  ,----
+  | make run        # build the image (if needed) and drop into an interactive shell
+  `----
+
+        `make shell' is an alias for the same thing.
+
+  Once inside the container we are greeted with a poor man's welcome
+  banner that lists the available commands.
+
+
+1.2 The `inspect' tool
+~~~~~~~~~~~~~~~~~~~~~~
+
+  `inspect' is on `$PATH' inside the container. Every command works on
+  the pre-built binaries, so there is no compilation delay during the
+  demo.
+
+
+1.2.1 List available programs
+-----------------------------
+
+  ,----
+  | inspect
+  `----
+
+  Prints all bug programs with a short description and which sanitizer
+  they target.
+
+
+1.2.2 View source code
+----------------------
+
+  ,----
+  | inspect <name>
+  `----
+
+  Example:
+
+  ,----
+  | inspect stack_overflow
+  `----
+
+
+1.2.3 Disassemble `main()' --- without sanitizer
+------------------------------------------------
+
+  ,----
+  | inspect <name> plain
+  `----
+
+  Shows the objdump disassembly of `main()' compiled with `gcc -O0 -g'
+  only. For example, `stack_overflow' produces ~32 instructions:
+  straightforward array init, an indexed store, a printf, and a return.
+
+
+1.2.4 Disassemble `main()' --- with sanitizer
+---------------------------------------------
+
+  ,----
+  | inspect <name> asan      # ASan programs
+  | inspect <name> ubsan     # UBSan programs
+  `----
+
+  Same function, but now compiled with `-fsanitize=address' (or
+  `=undefined'). This is where we see the instrumentation:
+  - *Shadow-memory lookups* before every load/store
+  - *Conditional calls* to `__asan_report_store4' /
+     `__asan_report_load4'
+  - *Red-zone poison values* written around stack/heap variables
+  - *Allocation interception* (`__interceptor_trampoline_malloc')
+
+
+1.2.5 Unified diff --- plain vs sanitized
+-----------------------------------------
+
+  ,----
+  | inspect <name> diff          # main() only
+  | inspect <name> diff full     # entire binary
+  `----
+
+  This produces a colour-coded unified diff and ends with an
+  instruction-count summary, e.g.:
+
+  ,----
+  | Plain: 32 instructions  |  ASAN: 176 instructions  |  Overhead: +144 insns
+  `----
+
+
+1.2.6 Pseudo-C decompilation (radare2)
+--------------------------------------
+
+  If raw assembly is too dense for you :), use the `decompile' commands
+  which produce C-like pseudo-code via radare2's `pdc':
+
+  ,----
+  | inspect <name> decompile         # pseudo-C --- no sanitizer
+  | inspect <name> decompile-san     # pseudo-C --- with sanitizer
+  | inspect <name> decompile-diff    # unified diff of both
+  `----
+
+  The pseudo-C keeps variable names and source-line annotations, making
+  the shadow-memory checks much easier to follow:
+
+  ,----
+  | rdx = rax
+  | rdx >>>= 3                 // addr >> 3  --- shadow memory index
+  | rdx += 0x7fff8000          // shadow base
+  | edx = byte [rdx]           // load shadow byte
+  | if (!v) goto loc_           // if clean, skip report
+  | sym.__asan_report_store4 () // else report the violation
+  `----
+
+
+* 1.2.6.1 Recommended demo sequence
+
+  ,----
+  | inspect <bug-program>                   # 1. show the source
+  | inspect <bug-program> plain             # 2. "here's the assembly --- nice and short"
+  | inspect <bug-program> asan              # 3. "now look at it with ASan --- 5x bigger"
+  | inspect <bug-program> diff              # 4. side-by-side proof of instrumentation
+  | inspect <bug-program> decompile-diff    # 5. (optional) same diff but in pseudo-C
+  | inspect <bug-program> run-san           # 6. run it --- watch ASan catch the overflow
+  `----
+
+        Tip: start with the `diff' (assembly) for the "wow, look
+        at all that extra code" moment, then switch to
+        `decompile-diff' to walk through what each inserted block
+        actually /does/ in a more readable form.
+
+
+1.2.7 Run a program
+-------------------
+
+  ,----
+  | inspect <name> run          # run the plain (unsanitized) binary
+  | inspect <name> run-san      # run the sanitized binary (shows the report)
+  `----
+
+  Useful to see that the plain binary silently corrupts memory while the
+  sanitized one aborts with a detailed diagnostic.
+
+
+1.3 Bug programs
+~~~~~~~~~~~~~~~~
+
+   Name              Sanitizer  What it does                                                                            
+  ----------------------------------------------------------------------------------------------------------------------
+   `stack_overflow'  ASan       Writes past the end of a stack `int[4]' --- *best for showing red-zone instrumentation* 
+   `heap_overflow'   ASan       Writes one element past a `malloc''d array                                              
+   `double_free'     ASan       Frees the same pointer twice                                                            
+   `null_deref'      UBSan      Dereferences a null pointer                                                             
+
+
+1.4 Other make targets
+~~~~~~~~~~~~~~~~~~~~~~
+
+   Target          Description                                                          
+  --------------------------------------------------------------------------------------
+   `make run'      Interactive shell (builds image first)                               
+   `make reports'  Compile and run every bug under its sanitizer, print all diagnostics 
+   `make image'    Build the Docker image only                                          
+   `make clean'    Remove the Docker image                                              
+
+
+1.5 Using `objdump' directly
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  The pre-built binaries live in `/work/build/{plain,asan,ubsan}/'. You
+  can always drop down to raw objdump for anything `inspect' doesn't
+  cover:
+
+  ,----
+  | # full disassembly
+  | objdump -d -M intel /work/build/asan/heap_overflow | less
+  | 
+  | # with raw instruction bytes (shows size overhead per instruction)
+  | objdump -d -M intel /work/build/asan/stack_overflow | less
+  | 
+  | # compare section sizes
+  | size /work/build/plain/stack_overflow /work/build/asan/stack_overflow
+  `----
+
+
+1.6 Using `radare2' directly
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  `radare2' is also available inside the container. The `inspect
+  decompile*' commands use `pdc' (pseudo-C disassembler) under the hood,
+  but you can do more interactively:
+
+  ,----
+  | # Quick pseudo-C of main (same as inspect <name> decompile)
+  | r2 -q -e scr.color=0 -e asm.syntax=intel -c 'aaa; s main; pdc' /work/build/asan/stack_overflow
+  | 
+  | # Interactive session, a.k.a. explore any function
+  | r2 /work/build/asan/stack_overflow
+  |   > aaa          # analyse all
+  |   > afl          # list functions (notice __asan_* helpers)
+  |   > s main       # seek to main
+  |   > pdc          # pseudo-C
+  |   > pdf          # classic disassembly
+  |   > VV           # visual graph mode (q to quit)
+  |   > q            # exit r2
+  `----
+
+
+1.7 Debugging with `pwndbg'
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  `pwndbg' is pre-installed for interactive debugging. It enhances GDB
+  with coloured disassembly, register display, and heap
+  inspection---useful for stepping through what the sanitizer checks
+  actually do at runtime.
+
+  ,----
+  | # debug the sanitized binary
+  | pwndbg ./build/asan/heap_overflow
+  | 
+  | # inside pwndbg:
+  |   pwndbg> break main
+  |   pwndbg> run
+  |   pwndbg> ni                    # step one instruction at a time
+  |   pwndbg> context               # show regs + disasm + stack
+  |   pwndbg> telescope $rsp 20     # inspect stack (see red-zone poison values)
+  |   pwndbg> heap                  # show heap state (after malloc)
+  |   pwndbg> continue              # let ASan catch the bug
+  `----
+
+        Tip: step through the sanitized binary
+        instruction-by-instruction (`ni') while watching the
+        shadow memory region. You can read the shadow byte with
+        `x/bx ($rax >> 3) + 0x7fff8000' to see it flip from 0x00
+        (accessible) to a poison value after the overflow.
+
+
+1.8 Heap red-zone & shadow memory demo (`shadow_demo.py')
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  A [libdebug] (TM) script that compiles a small heap-overflow program
+  twice (plain and with ASan), runs both under a debugger, and contrasts
+  the memory layout around the heap allocation.
+
+  ,----
+  | python3 shadow_demo.py
+  `----
+
+  The script runs in two phases:
+
+  *Phase 1 --- PLAIN (no sanitizer):* Dumps heap memory around the
+   buffer before and after the overflow. We can see that the
+   out-of-bounds write silently corrupts adjacent heap metadata with
+   zero detection.
+
+  *Phase 2 --- ASAN (-fsanitize=address):* Dumps heap memory showing the
+   red zones ASan places around the allocation, then lets the overflow
+   attempt proceed. ASan catches it before the store happens. The script
+   then shows the shadow memory bytes and highlights the poisoned byte
+   that triggered the violation.
+
+  What we can see in the output (roughly):
+
+  - *Green bytes* --- inside the allocated buffer (accessible)
+  - *Red bytes* --- outside the buffer / red-zone area
+  - *White-on-red bytes* --- the 4-byte overflow target (plain only)
+  - *Shadow memory dump* with `00' (green, accessible) and `fa' (red,
+    heap red zone) bytes
+  - A final summary diagram contrasting PLAIN vs ASAN layout
+
+
+[libdebug] <https://github.com/libdebug/libdebug>
+
+
+1.9 Final remarks
+~~~~~~~~~~~~~~~~~
+
+  1. *Every memory access gets a guard* --- look for the repeated
+     ,----
+     | shr=->=add=->=movzx=->=test=->=je=->=call __asan_report_*
+     `----
+     pattern before each `mov' that touches the array;
+  2. *Red-zone poisoning* --- ASan writes magic values into the shadow
+      memory around stack/heap variables.
+  3. *Instruction count overhead* --- the `diff' command prints the
+      count at the end.
+  4. *The sanitizer report itself* --- use `run-san' to show the
+      human-readable error with stack traces, shadow-memory dump, and
+      allocation context.

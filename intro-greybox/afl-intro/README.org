@@ -1,0 +1,87 @@
+* Intro to greybox fuzzing with AFL++
+** Goal
+Fuzz *Xpdf 3.02* (=pdftotext=) to rediscover [[https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2019-13288][CVE-2019-13288]], an *uncontrolled recursion* bug in the PDF parser that leads to stack exhaustion and a crash.
+
+Based on [[https://github.com/antonio-morales/Fuzzing101/tree/main/Exercise%201][Fuzzing101 Exercise 1]] by Antonio Morales.
+
+** What you will learn
+- How to compile a target with AFL++ instrumentation (=afl-clang-fast=)
+- How to run =afl-fuzz= on a real-world program
+- How to triage crashes with GDB
+- The difference between grey-box (coverage-guided) and black-box (random) fuzzing
+
+** Quick start
+#+begin_src sh
+make build          # build the Docker image (~5 min)
+make fuzz           # start grey-box fuzzing
+#+end_src
+
+That's it! AFL++ will open its status screen. Watch the *"saved crashes"* counter --- once it's >= 1, you've found the bug. This can take a few minutes up to a couple of hours depending on your machine.
+
+** How it works
+The Docker image: 1. Downloads Xpdf 3.02 source code 2. Compiles it with =afl-clang-fast= (AFL++'s compiler wrapper that inserts coverage instrumentation) 3. Use a few sample PDF files as seed inputs
+
+When you run =make fuzz=, it executes:
+
+#+begin_example
+afl-fuzz -i seeds/ -o out/ -- install/bin/pdftotext @@ /tmp/output
+#+end_example
+
+| Flag                       | Meaning                                                      |
+|----------------------------+--------------------------------------------------------------|
+| =-i seeds/=                | Directory with seed input files (sample PDFs)                |
+| =-o out/=                  | Directory where AFL++ stores results and crashes             |
+| =--=                       | Separator between AFL++ options and the target command       |
+| =pdftotext @@ /tmp/output= | The target command. =@@= is replaced by each test input file |
+
+** Available make targets
+
+| Command           | Description                                                                       |
+|-------------------+-----------------------------------------------------------------------------------|
+| =make build=      | Build the Docker image                                                            |
+| =make fuzz=       | *Grey-box* fuzzing --- AFL++ uses coverage feedback to guide mutations            |
+| =make run=        | Drop into the container with a shell                                              |
+| =make shell=      | Open a shell in an already running container                                      |
+| =make clean=      | Remove containers and image                                                       |
+
+** Triaging a crash
+Once AFL++ finds a crash, open a shell in the container:
+
+#+begin_src sh
+make shell
+#+end_src
+
+Inside the container, reproduce the crash:
+
+#+begin_src sh
+install/bin/pdftotext out/default/crashes/<crash-file> /tmp/out
+#+end_src
+
+You should see a segmentation fault. To investigate, use GDB:
+
+#+begin_src sh
+gdb --args install/bin/pdftotext out/default/crashes/<crash-file> /tmp/out
+#+end_src
+
+Inside GDB:
+
+#+begin_example
+(gdb) run
+(gdb) bt
+#+end_example
+
+The backtrace will show many repeated calls to =Parser::getObj= --- this
+is the infinite recursion described in CVE-2019-13288.
+
+** Files
+| File         | Purpose                                                                    |
+|--------------+----------------------------------------------------------------------------|
+| =Dockerfile= | Builds Xpdf with AFL++ instrumentation + a vanilla copy for black-box mode |
+| =Makefile=   | Convenience targets for building and fuzzing                               |
+| =README.org= | This file                                                                  |
+| =README.txt= | Plain text version of this file                                            |
+
+** References
+- [[https://github.com/antonio-morales/Fuzzing101/tree/main/Exercise%201][Fuzzing101 Exercise 1]]
+- [[https://aflplus.plus/docs/][AFL++ documentation]]
+- [[https://www.cvedetails.com/cve/CVE-2019-13288/][CVE-2019-13288]]

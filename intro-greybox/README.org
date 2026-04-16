@@ -1,0 +1,32 @@
+* CS-412 Fuzzing Lab 2 --- Introduction to Greybox Fuzzing and Sanitizers
+
+Slides: [[https://docs.google.com/presentation/d/1vdEUggIJTtoe0_DfAxIiZy4ARoJwdAig4scQzXf7CEg/edit?slide=id.g3d5cefbae9d_2_0#slide=id.g3d5cefbae9d_2_0][Greybox Fuzzing and Sanitizers]].
+
+This directory contains the material presented during Fuzzing Lab 2 of /CS-412: Software Security/ at EPFL, 2026. The lab covers two core topics: *coverage-guided (greybox) fuzzing* with AFL++ and *compiler sanitizers* (AddressSanitizer and UndefinedBehaviorSanitizer). Both topics are demonstrated through self-contained, Docker-based exercises.
+
+** Contents
+
+- [[file:afl-intro/][=afl-intro/=]] --- Greybox fuzzing with AFL++. Walks through fuzzing *Xpdf 3.02* (=pdftotext=) to rediscover [[https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2019-13288][CVE-2019-13288]], an uncontrolled recursion bug. Covers compiling a target with =afl-clang-fast=, running =afl-fuzz=, and triaging crashes with GDB.
+- [[file:san-reports/][=san-reports/=]] --- Sanitizers under the hood. Provides an interactive environment for inspecting how ASan and UBSan instrument compiled code. Includes pre-built binaries, an =inspect= tool for comparing plain vs. sanitized assembly, and a =shadow_demo.py= script that visualises heap red zones and shadow memory.
+
+** Prerequisites
+
+- Docker (all tools run inside containers, so no local compiler setup is needed)
+- Make (the actual entry point)
+
+** Getting Started
+
+Each subdirectory has its own =README= with detailed instructions. In short:
+
+#+begin_src sh
+# greybox fuzzing exercise
+cd afl-intro
+make build   # build the Docker image
+make fuzz    # start fuzzing Xpdf with AFL++
+
+# sanitizer demo
+cd san-reports
+make run     # build the image and open an interactive shell
+#+end_src
+
+In both cases, you could be required to perform a =make clean= before building.
